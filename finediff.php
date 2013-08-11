@@ -38,6 +38,9 @@
  * 15-Jul-2013 (Peter Bagnall):
  *   - fixed bug where getting the diff of "abc def" and "abc def ghi" would fail
  *     to recognise that def was a match, because whitespace was being included in fragments.
+ *
+ * 12-Aug-2013 (Thomas Bachem):
+ *   - fixed/optimized UTF-8 support
 */
 
 mb_internal_encoding('UTF-8');
@@ -656,28 +659,18 @@ class FineDiff {
 	private static function extractFragments($text, $delimiters) {
 		// special case: split into characters
 		if ( empty($delimiters) ) {
-			$chars = self::splitToChars($text);
+			$chars = self::mb_str_split($text, 1);
 			$chars[] = '';
 			return $chars;
 			}
 		$fragments = array();
-		$start = $end = 0;
-		for (;;) {
-			$end += self::mb_strcspn($text, $delimiters, $end);
-			if ( $end === $start ) {
-				break;
-				}
-			$fragments[$start] = mb_substr($text, $start, $end - $start);
-			$start = $end;
-
-			$end += self::mb_strspn($text, $delimiters, $end);
-			if ( $end === $start ) {
-				break;
-				}
-			$fragments[$start] = mb_substr($text, $start, $end - $start);
-			$start = $end;
-			}
-		$fragments[$start] = '';
+		$offset = 0;
+		$split = preg_split('/([' . preg_quote($delimiters, '/') . ']+)/u', $text, null, PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE);
+		foreach($split as $m) {
+			$fragments[$offset] = $m;
+			$offset += mb_strlen($m);
+		}
+		$fragments[$offset] = '';
 		return $fragments;
 		}
 
@@ -706,37 +699,18 @@ class FineDiff {
 		}
 			}
 
-	private static function splitToChars($str) {
-		preg_match_all('/./us', $str, $matches);
-		$matches = $matches[0];
-
-		if (count($matches) === 0) return array('');
-		return $matches;
-	}
-
-	private static function mb_strcspn($str, $delimiters, $start) {
-		$dels = self::splitToChars($delimiters);
-		$min  = mb_strlen($str);
-
-		foreach ($dels as $del) {
-			$pos = mb_strpos($str, $del, $start);
-			if ($pos !== false && $pos < $min) $min = $pos;
+	private static function mb_str_split($str, $split_length = 1) {
+		return preg_split('/(?=(.{' . (int)$split_length . '})*$)/us', $str);
 		}
 
-		return $min - $start;
+	private static function mb_strspn($str, $delimiters, $start = 0, $length = null) {
+		if($start || $length) {
+			$str = mb_substr($str, $start, $length ? $length : mb_strlen($str) - $start);
 		}
-
-	private static function mb_strspn($str, $delimiters, $start) {
-		$str  = mb_substr($str, $start);
-		$dels = self::splitToChars($delimiters);
-
-		foreach ($dels as $idx => $del) {
-			$dels[$idx] = preg_quote($del, '/');
-	}
-
-		$dels = implode('|', $dels);
-
-		preg_match("/^($dels)+/us", $str, $match);
-		return $match ? mb_strlen($match[0]) : 0;
-	}
+		if(preg_match('/^[' . preg_quote($delimiters, '/') . ']+/', $str, $m)) {
+			return mb_strlen($m[0]);
+		} else {
+			return 0;
+		}
+		}
 }
