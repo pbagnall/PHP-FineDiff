@@ -664,23 +664,13 @@ class FineDiff {
 			return $chars;
 			}
 		$fragments = array();
-		$start = $end = 0;
-		for (;;) {
-			$end += self::mb_strcspn($text, $delimiters, $end);
-			if ( $end === $start ) {
-				break;
-				}
-			$fragments[$start] = mb_substr($text, $start, $end - $start);
-			$start = $end;
-
-			$end += self::mb_strspn($text, $delimiters, $end);
-			if ( $end === $start ) {
-				break;
-				}
-			$fragments[$start] = mb_substr($text, $start, $end - $start);
-			$start = $end;
-			}
-		$fragments[$start] = '';
+		$offset = 0;
+		$split = preg_split('/([' . preg_quote($delimiters, '/') . ']+)/u', $text, null, PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE);
+		foreach($split as $m) {
+			$fragments[$offset] = $m;
+			$offset += mb_strlen($m);
+		}
+		$fragments[$offset] = '';
 		return $fragments;
 		}
 
@@ -711,17 +701,6 @@ class FineDiff {
 
 	private static function mb_str_split($str, $split_length = 1) {
 		return preg_split('/(?=(.{' . (int)$split_length . '})*$)/us', $str);
-		}
-
-	private static function mb_strcspn($str, $delimiters, $start = 0, $length = null) {
-		if($start || $length) {
-			$str = mb_substr($str, $start, $length ? $length : mb_strlen($str) - $start);
-		}
-		if(preg_match('/^[^' . preg_quote($delimiters, '/') . ']+/', $str, $m)) {
-			return mb_strlen($m[0]);
-		} else {
-			return 0;
-		}
 		}
 
 	private static function mb_strspn($str, $delimiters, $start = 0, $length = null) {
