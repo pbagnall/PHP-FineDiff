@@ -469,8 +469,9 @@ class FineDiff {
 				continue;
 				}
 
-			// find longest copy operation for the current segments
-			$best_copy_length = 0;
+			// Find the group that has the longest copy operation's total length for
+			// the current segments.
+			$copy_operations_groups = array();
 
 			$from_base_fragment_index = $from_segment_start;
 
@@ -523,43 +524,88 @@ class FineDiff {
 						$fragment_length = mb_strlen($from_fragments[$fragment_from_index]);
 						$fragment_index_offset += $fragment_length;
 						}
-					if ( $fragment_index_offset > $best_copy_length ) {
 						// if the matching string is just made up of delimiters then don't count it as a match. This prevents an
 						// excessive number of whitespaces being seen as matches and therefore breaking up a long replace segment
 						// to no useful purpose.
 						if ($fragment_index_offset > $from_base_fragment_length || self::mb_strspn($from_base_fragment, $delimiters, 0)===0) {
-							$best_copy_length = $fragment_index_offset;
-							$best_from_start = $from_base_fragment_index;
-							$best_to_start = $to_base_fragment_index;
-							}
+							$copy_operation = array(
+								'length' => $fragment_index_offset,
+								'from_start' => $from_base_fragment_index,
+								'to_start' => $to_base_fragment_index,
+							);
+							// Move copy operations into group to find the best group.
+							static::addCopyOperationToGroup($copy_operations_groups, $copy_operation);
 						}
 					}
 				$from_base_fragment_index += $from_base_fragment_length;
-				// If match is larger than half segment size, no point trying to find better
-				// TODO: Really?
-				if ( $best_copy_length >= $from_segment_length / 2) {
-					break;
-					}
-				// no point to keep looking if what is left is less than
-				// current best match
-				if ( $from_base_fragment_index + $best_copy_length >= $from_segment_end ) {
-					break;
-					}
 				}
 
-			if ( $best_copy_length ) {
-				$jobs[] = array($from_segment_start, $best_from_start, $to_segment_start, $best_to_start);
-				$result[$best_from_start * 4 + 2] = new FineDiffCopyOp($best_copy_length);
-				$jobs[] = array($best_from_start + $best_copy_length, $from_segment_end, $best_to_start + $best_copy_length, $to_segment_end);
+			if ( $copy_operations_groups ) {
+				$best_copy_length = NULL;
+				$best_group_index = NULL;
+				// Calculate best copy length first.
+				foreach ($copy_operations_groups as $group_index => $copy_operations) {
+					$current_copy_length = 0;
+					foreach ($copy_operations as $copy_operation) {
+						$current_copy_length += $copy_operation['length'];
+					}
+					if ($best_copy_length === NULL || $current_copy_length > $best_copy_length) {
+						$best_copy_length = $current_copy_length;
+						$best_group_index = $group_index;
+					}
 				}
-			else {
-				$result[$from_segment_start * 4 ] = new FineDiffReplaceOp($from_segment_length, mb_substr($to_text, $to_segment_start, $to_segment_length));
+				// Add best optimized copy operations.
+				$best_copy_operations = $copy_operations_groups[$best_group_index];
+				foreach ($best_copy_operations as $operation_index => $copy_operation) {
+					if ($operation_index == 0) {
+						// First operation.
+						$jobs[] = array($from_segment_start, $copy_operation['from_start'], $to_segment_start, $copy_operation['to_start']);
+					}
+					elseif ($operation_index == count($best_copy_operations) - 1) {
+						// Last operation.
+						$jobs[] = array($copy_operation['from_start'] + $copy_operation['length'], $from_segment_end, $copy_operation['to_start'] + $copy_operation['length'], $to_segment_end);
+					}
+					if ($operation_index > 0) {
+						$previous_operation_index = $operation_index - 1;
+						$previous_copy_operation = $best_copy_operations[$previous_operation_index];
+						$jobs[] = array($previous_copy_operation['from_start'] + $previous_copy_operation['length'], $copy_operation['from_start'], $previous_copy_operation['to_start'] + $previous_copy_operation['length'], $copy_operation['to_start']);
+					}
+					$result[$copy_operation['from_start'] * 4 + 2] = new FineDiffCopyOp($copy_operation['length']);
 				}
 			}
+			else {
+				$result[$from_segment_start * 4 ] = new FineDiffReplaceOp($from_segment_length, mb_substr($to_text, $to_segment_start, $to_segment_length));
+			}
+		}
 
 		ksort($result, SORT_NUMERIC);
 		return array_values($result);
 		}
+
+	/**
+	* Add a copy operation to a group, if that operation does not conflict with
+	* other operations in that group.
+	*/
+	private static function addCopyOperationToGroup(&$copy_operations_groups, $copy_operation) {
+		if (empty($copy_operations_groups)) {
+			$copy_operations_groups = array(
+				array($copy_operation),
+			);
+			return;
+		}
+		foreach ($copy_operations_groups as &$copy_operations) {
+			$last_copy_operation = end($copy_operations);
+			if ($last_copy_operation['from_start'] + $last_copy_operation['length'] < $copy_operation['from_start'] &&
+				$last_copy_operation['to_start'] + $last_copy_operation['length'] < $copy_operation['to_start']) {
+				// $copy_operation was sorted before, so all we need to do is add
+				// that operation to the end to the group.
+				$copy_operations[] = $copy_operation;
+				return;
+			}
+		}
+		// Can not find any suitable group, add new group.
+		$copy_operations_groups[] = array($copy_operation);
+	}
 
 	/**
 	* Perform a character-level diff.
