@@ -38,6 +38,11 @@
  * 15-Jul-2013 (Peter Bagnall):
  *   - fixed bug where getting the diff of "abc def" and "abc def ghi" would fail
  *     to recognise that def was a match, because whitespace was being included in fragments.
+ *
+ * 23-Nov-2015 (Tien Vo Xuan):
+ *   - Improve copy operations in opcodes, e.g. When getting the diff of 'comes the sun comes the sun'
+ *     and 'Here comes the sun. Here comes the sun, and I say, It's all right',
+ *     it should return 'd5c13d7i2:, c13d27' instead of 'd4i13:comes the sunc14d47'.
 */
 
 mb_internal_encoding('UTF-8');
